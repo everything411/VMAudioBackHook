@@ -1,5 +1,4 @@
-﻿// dllmain.cpp : 定义 DLL 应用程序的入口点。
-#include "pch.h"
+﻿#include "pch.h"
 
 typedef NTSTATUS(WINAPI* NtQueryTimerResolution_t)(ULONG* pMin, ULONG* pMax, ULONG* pCurr);
 typedef NTSTATUS(WINAPI* NtSetTimerResolution_t)(ULONG desired, BOOL doSet, ULONG* pCurr);
