@@ -621,57 +621,6 @@ BOOL WINAPI Init()
 	return TRUE;
 }
 
-DWORD WINAPI ThreadProc(LPVOID lpThreadParameter)
-{
-	HRESULT hr = 0;
-	WCHAR ntdll_path[MAX_PATH] = L"";
-	HMODULE ntdll_hMod = 0;
-	NtQueryTimerResolution_t pfnNtQueryTimerResolution = NULL;
-	NtSetTimerResolution_t pfnNtSetTimerResolution = NULL;
-	ULONG minRes = 0, maxRes = 0, currRes = 0, desiredRes = 0;
-	NTSTATUS ntstatus = 0;
-
-	GetSystemDirectoryW(ntdll_path, MAX_PATH);
-	lstrcatW(ntdll_path, L"\\ntdll.dll");
-	ntdll_hMod = GetModuleHandleW(ntdll_path);
-	if (!ntdll_hMod)
-	{
-		DWORD w32err = GetLastError();
-		hr = HRESULT_FROM_WIN32(w32err);
-		goto eof;
-	}
-	pfnNtQueryTimerResolution = (NtQueryTimerResolution_t)GetProcAddress(ntdll_hMod, "NtQueryTimerResolution");
-	if (!pfnNtQueryTimerResolution)
-	{
-		hr = E_NOTIMPL;
-		goto eof;
-	}
-	pfnNtSetTimerResolution = (NtSetTimerResolution_t)GetProcAddress(ntdll_hMod, "NtSetTimerResolution");
-	if (!pfnNtSetTimerResolution)
-	{
-		hr = E_NOTIMPL;
-		goto eof;
-	}
-
-	ntstatus = pfnNtQueryTimerResolution(&minRes, &maxRes, &currRes);
-	if (ntstatus)
-	{
-		hr = E_FAIL;
-		goto eof;
-	}
-	// in 100-ns units, 1000000ns = 1ms
-	desiredRes = 10000;
-	ntstatus = pfnNtSetTimerResolution(desiredRes, TRUE, &currRes);
-	if (ntstatus)
-	{
-		hr = E_FAIL;
-		goto eof;
-	}
-eof:
-	return hr;
-}
-
-
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, PVOID pvReserved)
 {
 	if (dwReason == DLL_PROCESS_ATTACH)
@@ -688,12 +637,52 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, PVOID pvReserved)
 
 			if (StrCmpI(szCurName, szAppName) == 0)
 			{
-				// Go!
-				HANDLE hThread = CreateThread(NULL, NULL, ThreadProc, NULL, NULL, NULL);
-				if (hThread)
+				HRESULT hr = 0;
+				WCHAR ntdll_path[MAX_PATH] = L"";
+				HMODULE ntdll_hMod = 0;
+				NtQueryTimerResolution_t pfnNtQueryTimerResolution = NULL;
+				NtSetTimerResolution_t pfnNtSetTimerResolution = NULL;
+				ULONG minRes = 0, maxRes = 0, currRes = 0, desiredRes = 0;
+				NTSTATUS ntstatus = 0;
+			
+				GetSystemDirectoryW(ntdll_path, MAX_PATH);
+				lstrcatW(ntdll_path, L"\\ntdll.dll");
+				ntdll_hMod = GetModuleHandleW(ntdll_path);
+				if (!ntdll_hMod)
 				{
-					CloseHandle(hThread);
+					DWORD w32err = GetLastError();
+					hr = HRESULT_FROM_WIN32(w32err);
+					goto eof;
 				}
+				pfnNtQueryTimerResolution = (NtQueryTimerResolution_t)GetProcAddress(ntdll_hMod, "NtQueryTimerResolution");
+				if (!pfnNtQueryTimerResolution)
+				{
+					hr = E_NOTIMPL;
+					goto eof;
+				}
+				pfnNtSetTimerResolution = (NtSetTimerResolution_t)GetProcAddress(ntdll_hMod, "NtSetTimerResolution");
+				if (!pfnNtSetTimerResolution)
+				{
+					hr = E_NOTIMPL;
+					goto eof;
+				}
+			
+				ntstatus = pfnNtQueryTimerResolution(&minRes, &maxRes, &currRes);
+				if (ntstatus)
+				{
+					hr = E_FAIL;
+					goto eof;
+				}
+				// in 100-ns units, 1000000ns = 1ms
+				desiredRes = 10000;
+				// GO!
+				ntstatus = pfnNtSetTimerResolution(desiredRes, TRUE, &currRes);
+				if (ntstatus)
+				{
+					hr = E_FAIL;
+					goto eof;
+				}
+			eof:;
 			}
 		}
 	}
