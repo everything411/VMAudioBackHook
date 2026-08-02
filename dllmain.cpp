@@ -1,7 +1,38 @@
-﻿#include "pch.h"
+#include "pch.h"
 
 typedef NTSTATUS(WINAPI* NtQueryTimerResolution_t)(ULONG* pMin, ULONG* pMax, ULONG* pCurr);
 typedef NTSTATUS(WINAPI* NtSetTimerResolution_t)(ULONG desired, BOOL doSet, ULONG* pCurr);
+
+static volatile LONG g_watchdogRunning = 1;
+static HANDLE g_watchdogThread = NULL;
+
+static DWORD WINAPI TimerWatchdogProc(LPVOID lpParam)
+{
+	UNREFERENCED_PARAMETER(lpParam);
+
+	HMODULE ntdll_hMod = GetModuleHandleW(L"ntdll.dll");
+	if (!ntdll_hMod) return 1;
+	NtQueryTimerResolution_t pfnNtQueryTimerResolution =
+		(NtQueryTimerResolution_t)GetProcAddress(ntdll_hMod, "NtQueryTimerResolution");
+	NtSetTimerResolution_t pfnNtSetTimerResolution =
+		(NtSetTimerResolution_t)GetProcAddress(ntdll_hMod, "NtSetTimerResolution");
+	if (!pfnNtQueryTimerResolution || !pfnNtSetTimerResolution) return 1;
+
+	ULONG minRes = 0, maxRes = 0, currRes = 0;
+	const ULONG desiredRes = 10000; // 1 ms, in 100-ns units
+
+	while (g_watchdogRunning)
+	{
+		Sleep(1000);
+		if (pfnNtQueryTimerResolution(&minRes, &maxRes, &currRes) != 0)
+			continue;
+		// Someone (e.g. audio re-init on tab switch) downgraded the resolution.
+		// Re-assert it; leave it alone if it's already equal or better (smaller).
+		if (currRes > desiredRes)
+			pfnNtSetTimerResolution(desiredRes, TRUE, &currRes);
+	}
+	return 0;
+}
 
 //
 // created by AheadLib
@@ -413,7 +444,7 @@ BOOL WINAPI Load()
 }
 
 
-FARPROC WINAPI GetAddress(PCSTR pszProcName)
+PVOID WINAPI GetAddress(PCSTR pszProcName)
 {
 	FARPROC fpAddress;
 	CHAR szProcName[64];
@@ -432,7 +463,7 @@ FARPROC WINAPI GetAddress(PCSTR pszProcName)
 		MessageBox(NULL, tzTemp, TEXT("AheadLib"), MB_ICONSTOP);
 		ExitProcess(-2);
 	}
-	return fpAddress;
+	return (PVOID)fpAddress;
 }
 
 BOOL WINAPI Init()
@@ -683,11 +714,19 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, PVOID pvReserved)
 					goto eof;
 				}
 			eof:;
+				g_watchdogThread = CreateThread(NULL, 0, TimerWatchdogProc, NULL, 0, NULL);
 			}
 		}
 	}
 	else if (dwReason == DLL_PROCESS_DETACH)
 	{
+		g_watchdogRunning = 0;
+		if (g_watchdogThread)
+		{
+			WaitForSingleObject(g_watchdogThread, 2000);
+			CloseHandle(g_watchdogThread);
+			g_watchdogThread = NULL;
+		}
 		Free();
 	}
 
